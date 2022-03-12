@@ -59,11 +59,20 @@ cdef class AroonOscillatorStrategy(StrategyBase):
         object _min_max_spread_diff
         object _ask_increase
         object _bid_increase
+        object _buy_reference_price
+        object _sell_reference_price
         object _trend_factor
         str _debug_csv_path
         bint _is_debug
 
         AroonOscillatorIndicator _aroon_osc
+
+        object _avg_vol
+
+        double _next_volatility_update
+        object _starting_volatility
+        object _risk_factor
+        object _volatility_spread
 
     cdef object c_get_mid_price(self)
     cdef object c_create_base_proposal(self)
@@ -87,3 +96,5 @@ cdef class AroonOscillatorStrategy(StrategyBase):
     cdef bint c_to_create_orders(self, object proposal)
     cdef c_execute_orders_proposal(self, object proposal)
     cdef set_timers(self)
+
+    cdef double c_get_spread(self)

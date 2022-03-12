@@ -39,6 +39,7 @@ from hummingbot.strategy.pure_market_making.inventory_skew_calculator import cal
 from .aroon_oscillator_indicator cimport AroonOscillatorIndicator, OscillatorPeriod
 from .aroon_oscillator_indicator import AroonOscillatorIndicator, OscillatorPeriod
 
+from hummingbot.strategy.__utils__.trailing_indicators.instant_volatility import InstantVolatilityIndicator
 
 NaN = float("nan")
 s_decimal_zero = Decimal(0)
@@ -115,6 +116,8 @@ cdef class AroonOscillatorStrategy(StrategyBase):
                  take_if_crossed: bool = False,
                  price_ceiling: Decimal = s_decimal_neg_one,
                  price_floor: Decimal = s_decimal_neg_one,
+                 starting_volatility: Decimal = Decimal("0.01"),
+                 risk_factor: Decimal = Decimal("2.75"),
                  logging_options: int = OPTION_LOG_ALL,
                  status_report_interval: float = 900,
                  hb_app_notification: bool = False,
@@ -127,6 +130,7 @@ cdef class AroonOscillatorStrategy(StrategyBase):
             raise ValueError("Parameter price_ceiling cannot be lower than price_floor.")
 
         super().__init__()
+
         self._sb_order_tracker = AroonOscillatorOrderTracker()
         self._market_info = market_info
         self._bid_spread = s_decimal_zero
@@ -163,6 +167,8 @@ cdef class AroonOscillatorStrategy(StrategyBase):
         self._period_length = period_length
         self._period_duration = period_duration
         self._cancel_order_spread_threshold = cancel_order_spread_threshold
+        self._starting_volatility  = starting_volatility
+        self._risk_factor = risk_factor
 
         self._cancel_timestamp = 0
         self._create_timestamp = 0
@@ -183,8 +189,15 @@ cdef class AroonOscillatorStrategy(StrategyBase):
         self._min_max_spread_diff = s_decimal_zero
         self._ask_increase = s_decimal_zero
         self._bid_increase = s_decimal_zero
+        self._buy_reference_price = s_decimal_zero
+        self._sell_reference_price = s_decimal_zero
         self._debug_csv_path = debug_csv_path
         self._is_debug = is_debug
+
+        # New volatility indicator here
+        self._next_volatility_update = 0
+        self._volatility_spread = s_decimal_zero
+        self._avg_vol = InstantVolatilityIndicator(processing_length=self._period_length, sampling_length=self._period_length)
 
         self.c_add_markets([market_info.market])
 
@@ -316,6 +329,23 @@ cdef class AroonOscillatorStrategy(StrategyBase):
     @maximum_spread.setter
     def maximum_spread(self, value: Decimal):
         self._maximum_spread = value
+
+    @property
+    def starting_volatility(self) -> Decimal:
+        return self._starting_volatility
+
+    @starting_volatility.setter
+    def starting_volatility(self, value: Decimal):
+        self._starting_volatility = value
+
+    @property
+    def risk_factor(self) -> Decimal:
+        return self._risk_factor
+
+    @risk_factor.setter
+    def risk_factor(self, value: Decimal):
+        self._risk_factor = value
+
 
     @property
     def order_optimization_enabled(self) -> bool:
@@ -502,12 +532,53 @@ cdef class AroonOscillatorStrategy(StrategyBase):
     def order_tracker(self):
         return self._sb_order_tracker
 
+    @property
+    def avg_vol(self):
+        return self._avg_vol
+
+    @avg_vol.setter
+    def avg_vol(self, indicator: InstantVolatilityIndicator):
+        self._avg_vol = indicator
+
+    cdef double c_get_spread(self):
+        cdef:
+            ExchangeBase market = self._market_info.market
+        #    str trading_pair = self._market_info.trading_pair
+
+        bid = market.c_get_price(self.trading_pair, False)
+        ask = market.c_get_price(self.trading_pair, True)
+        #self.logger().info(f"c_get_spread trading pairs: {self.trading_pair}  bid: {bid:.2f}  ask: {ask:.2f}")
+
+        return ask - bid
+
+    def get_spread(self):
+        return self.c_get_spread()
+
+    # Returns the volatility expressed as percentage of price
+    def get_volatility(self):
+        price = self.get_price()
+        vol = Decimal(str(self._avg_vol.current_value)) / Decimal(price)
+        # self.logger().info(f"get_volatility - volatility value was {vol:.8f}.")
+        if vol == s_decimal_zero:
+            # Default value at start time if price has no activity. Added a minimum for sanity check.
+            vol = self._starting_volatility
+            #self.logger().info(f"get_volatility - Using default volatility of {vol:.2%}.")
+            if vol == s_decimal_zero:
+                vol = Decimal(str(self.c_get_spread() / 2)) / Decimal(price)
+                #self.logger().info(f"get_volatility - No default provided. Using the spread value of {vol:.2%}.")
+
+        return vol
+
+
+
     def inventory_skew_stats_data_frame(self) -> Optional[pd.DataFrame]:
         cdef:
             ExchangeBase market = self._market_info.market
 
         price = self.get_price()
         base_asset_amount, quote_asset_amount = self.c_get_adjusted_available_balance(self.active_orders)
+
+        # TODO: Automatically calculate order size
         total_order_size = calculate_total_order_size(self._order_amount, self._order_level_amount, self._order_levels)
 
         base_asset_value = base_asset_amount * price
@@ -627,7 +698,7 @@ cdef class AroonOscillatorStrategy(StrategyBase):
         for market, trading_pair in market_books:
             bid_price = market.get_price(trading_pair, False)
             ask_price = market.get_price(trading_pair, True)
-            ref_price = float("nan")
+            ref_price = round(float(self._buy_reference_price), 4)
             markets_data.append([
                 market.display_name,
                 trading_pair,
@@ -666,6 +737,23 @@ cdef class AroonOscillatorStrategy(StrategyBase):
         else:
             lines.extend(["", "  No active maker orders."])
 
+        # TODO: Display current volatility level (DONE)
+        price = self.get_price()
+        variancepct = float(self.get_volatility())
+        variance = variancepct * float(price)
+        period_multiplier = float(self._period_length)**float(.5)
+
+        lines.extend([
+        "",
+        f"  Volatility Indicators:",
+        f"     Volatility (1 period) = {variance:.4f} ({variancepct:.4%})",
+        f"     Volatility Spread * risk factor: {self._volatility_spread:.4%}",
+        f"     Bid_increase: {self._bid_increase:.4%}    Ask_increase: {self._ask_increase:.4%}    Trend_factor: {self._trend_factor:.4%}",
+        f"     Adjusted Ask Spread = {self._ask_spread:.2%}",
+        f"     Adjusted Bid Spread = {self._bid_spread:.2%}",
+        ])
+
+
         last_aroon_period = self.aroon_last_period
         lines.extend([
             "",
@@ -675,12 +763,10 @@ cdef class AroonOscillatorStrategy(StrategyBase):
             f"    Aroon Osc = {self.aroon_osc:.3g}",
             f"    Aroon Indicator Full = {self.aroon_full}, Total periods {self.aroon_period_count}",
             f"    Current Period (start: {last_aroon_period.start:.0f}, end: {last_aroon_period.end:.0f}, high: {last_aroon_period.high:.5g}, low: {last_aroon_period.low:.5g})",
-            f"    Adjusted Ask Spread = {self.ask_spread:.2%}",
-            f"    Adjusted Bid Spread = {self.bid_spread:.2%}",
         ])
         if self.aroon_full or (0 < self._minimum_periods <= self.aroon_period_count):
             lines.extend([
-                f"    Calculation params = (spread_diff: {self.min_max_spread_diff:.4%}, ask_increase: {self.ask_increase:.4%}, bid_increase: {self.bid_increase:.4%}, trend_factor: {self.trend_factor:.4%}, osc_strength_factor: {self._aroon_osc_strength_factor:.2g})",
+                f"    Calculation params = (spread_diff: {self.min_max_spread_diff:.4%}, ask_increase: {self._ask_increase:.4%}, bid_increase: {self._bid_increase:.4%}, trend_factor: {self._trend_factor:.4%}, osc_strength_factor: {self._aroon_osc_strength_factor:.2g})",
                 f"    Ask Spread formula = ({self._minimum_spread:.5g} + ({self.min_max_spread_diff:.6g} * (1 - ({self.aroon_up} / 100)))) * ( 1 + ({self.aroon_osc} / 100 * {self._aroon_osc_strength_factor:.2g}))",
                 f"    Bid Spread formula = ({self._minimum_spread:.5g} + ({self.min_max_spread_diff:.6g} * (1 - ({self.aroon_down} / 100)))) * ( 1 - ({self.aroon_osc} / 100 * {self._aroon_osc_strength_factor:.2g}))",
             ])
@@ -736,10 +822,20 @@ cdef class AroonOscillatorStrategy(StrategyBase):
             proposal = None
             asset_mid_price = Decimal("0")
             # update the Aroon Oscillator Indicator with the last trade price data
-            self._aroon_osc.c_add_tick(self._current_timestamp, self.get_last_price())
+            price = self.get_last_price()
+            self._aroon_osc.c_add_tick(self._current_timestamp, price)
+
+            # TODO: Update volatility indicator (DONE)
+            if timestamp > self._next_volatility_update and not price.is_nan():
+                #self.logger().info(f"c_tick - price type: {price:.2f} => {type(price)}.")
+                # self.logger().info(f"c_tick - is price NaN? {}.")
+
+                self._avg_vol.add_sample(price)
+                self._next_volatility_update = timestamp + self._period_duration
+
             # use the Aroon Oscillator Indicator to calculate the desired spreads
             self.c_adjust_spreads()
-            # asset_mid_price = self.c_set_mid_price(market_info)
+
             if self._create_timestamp <= self._current_timestamp:
                 # 1. Create base order proposals
                 proposal = self.c_create_base_proposal()
@@ -748,7 +844,8 @@ cdef class AroonOscillatorStrategy(StrategyBase):
                 # 3. Apply functions that modify orders price
                 self.c_apply_order_price_modifiers(proposal)
                 # 4. Apply functions that modify orders size
-                self.c_apply_order_size_modifiers(proposal)
+                # RLS - Deprecated. Inventory now changes the reservation price.
+                # self.c_apply_order_size_modifiers(proposal)
                 # 5. Apply budget constraint, i.e. can't buy/sell more than what you have.
                 self.c_apply_budget_constraint(proposal)
 
@@ -769,7 +866,23 @@ cdef class AroonOscillatorStrategy(StrategyBase):
             self._last_timestamp = timestamp
 
     cdef c_adjust_spreads(self):
-        self._min_max_spread_diff = self._maximum_spread - self._minimum_spread
+        #self._min_max_spread_diff = self._maximum_spread - self._minimum_spread
+
+        # Automatically calculate spread
+        # The first portion of the spread is due to volatility and is adjusted by the risk parameter, lambda.
+        # lamda here indicates # of std deviations from midprice to set spread (67% of trades will happen
+        # within 1 std deviation during the next period)
+        price = Decimal(self.get_price())
+        variance = Decimal(self.get_volatility())
+
+        # Base spread is bid-ask expressed as percentage
+        self._volatility_spread = Decimal(self.risk_factor) * variance
+
+        # self.logger().info(f"c_adjust_spreads: volatility_spread={self._volatility_spread}  min_max_spread_diff={self._min_max_spread_diff}")
+        # TODO: Add order book intensity spread
+
+        self._min_max_spread_diff = self._volatility_spread
+
 
         if self._aroon_osc.c_full() or (0 < self._minimum_periods <= self._aroon_osc.c_aroon_period_count()):
             # make aroon_up a percent and invert it for the ask spread, when aroon up is high, we want to sell
@@ -786,11 +899,36 @@ cdef class AroonOscillatorStrategy(StrategyBase):
             # adjust spreads to not exceed min/max spreads
             self._ask_spread = min(max(self._ask_spread, self._minimum_spread), self._maximum_spread)
             self._bid_spread = min(max(self._bid_spread, self._minimum_spread), self._maximum_spread)
+
         else:
             # when aroon isn't ready, just set the spreads to middle of min/max
             self._bid_spread = self._ask_spread = self._minimum_spread + (self._min_max_spread_diff * Decimal("0.5"))
 
         return None
+
+
+    def calculate_inventory_value(self):
+        base_asset_amount, quote_asset_amount = self.c_get_adjusted_available_balance(self.active_orders)
+        if base_asset_amount + quote_asset_amount == 0:
+            return 0.0
+        price = self.get_price()
+        if price == 0:
+            return 0.0
+        return (base_asset_amount * price + quote_asset_amount)
+
+
+
+    def calculate_order_amount(self):
+        accountvalue = self.calculate_inventory_value()
+
+        price = self.get_price()
+        if price == 0:
+            return 0.0
+
+        order_size = self._order_amount / Decimal(100.0) * accountvalue / price
+
+        return order_size
+
 
     cdef object c_create_base_proposal(self):
         cdef:
@@ -798,7 +936,25 @@ cdef class AroonOscillatorStrategy(StrategyBase):
             list buys = []
             list sells = []
 
-        buy_reference_price = sell_reference_price = self.get_price()
+        order_size = self.calculate_order_amount()
+        price = self.get_price()
+
+        # TODO: calculate reservation price based on current inventory
+        if self._inventory_target_base_pct is None or self._inventory_target_base_pct == 0:
+            self._buy_reference_price = self._sell_reference_price = price
+        else:
+            inventoryTargetAdj = 1.0
+            base_asset_amount, quote_asset_amount = self.c_get_adjusted_available_balance(self.active_orders)
+            base_value = base_asset_amount * price
+
+            total_inventory_value = (base_asset_amount * price + quote_asset_amount)
+            target_inventory_value = Decimal(total_inventory_value) * Decimal(self._inventory_target_base_pct) * Decimal(inventoryTargetAdj) / Decimal(100.0)
+            target_inventory_amount = target_inventory_value / price
+
+            # actual inventory level (q) - ranges from -.5 to +.5
+            q = (base_value - target_inventory_value) / total_inventory_value
+            self._buy_reference_price = self._sell_reference_price = price - (q * self._risk_factor * Decimal(self.get_volatility()))
+
 
         # First to check if a customized order override is configured, otherwise the proposal will be created according
         # to order spread, amount, and levels setting.
@@ -807,14 +963,14 @@ cdef class AroonOscillatorStrategy(StrategyBase):
             for key, value in order_override.items():
                 if str(value[0]) in ["buy", "sell"]:
                     if str(value[0]) == "buy":
-                        price = buy_reference_price * (Decimal("1") - Decimal(str(value[1])) / Decimal("100"))
+                        price = self._buy_reference_price * (Decimal("1") - Decimal(str(value[1])) / Decimal("100"))
                         price = market.c_quantize_order_price(self.trading_pair, price)
                         size = Decimal(str(value[2]))
                         size = market.c_quantize_order_amount(self.trading_pair, size)
                         if size > 0 and price > 0:
                             buys.append(PriceSize(price, size))
                     elif str(value[0]) == "sell":
-                        price = sell_reference_price * (Decimal("1") + Decimal(str(value[1])) / Decimal("100"))
+                        price = self._sell_reference_price * (Decimal("1") + Decimal(str(value[1])) / Decimal("100"))
                         price = market.c_quantize_order_price(self.trading_pair, price)
                         size = Decimal(str(value[2]))
                         size = market.c_quantize_order_amount(self.trading_pair, size)
@@ -822,16 +978,16 @@ cdef class AroonOscillatorStrategy(StrategyBase):
                             sells.append(PriceSize(price, size))
         else:
             for level in range(0, self._buy_levels):
-                price = buy_reference_price * (Decimal("1") - self._bid_spread - (level * self._order_level_spread))
+                price = self._buy_reference_price * (Decimal("1") - self._bid_spread - (level * self._order_level_spread))
                 price = market.c_quantize_order_price(self.trading_pair, price)
-                size = self._order_amount + (self._order_level_amount * level)
+                size = order_size + (self._order_level_amount * level)
                 size = market.c_quantize_order_amount(self.trading_pair, size)
                 if size > 0:
                     buys.append(PriceSize(price, size))
             for level in range(0, self._sell_levels):
-                price = sell_reference_price * (Decimal("1") + self._ask_spread + (level * self._order_level_spread))
+                price = self._sell_reference_price * (Decimal("1") + self._ask_spread + (level * self._order_level_spread))
                 price = market.c_quantize_order_price(self.trading_pair, price)
-                size = self._order_amount + (self._order_level_amount * level)
+                size = order_size + (self._order_level_amount * level)
                 size = market.c_quantize_order_amount(self.trading_pair, size)
                 if size > 0:
                     sells.append(PriceSize(price, size))
@@ -1358,7 +1514,7 @@ cdef class AroonOscillatorStrategy(StrategyBase):
                             self.aroon_up,
                             self.aroon_down,
                             self.aroon_osc,
-                            self.ask_increase,
-                            self.bid_increase,
-                            self.trend_factor)])
+                            self._ask_increase,
+                            self._bid_increase,
+                            self._trend_factor)])
         df.to_csv(self._debug_csv_path, mode='a', header=False, index=False)

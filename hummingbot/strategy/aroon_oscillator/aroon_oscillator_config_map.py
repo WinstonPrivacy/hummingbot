@@ -34,7 +34,7 @@ def validate_exchange_trading_pair(value: str) -> Optional[str]:
 async def order_amount_prompt() -> str:
     trading_pair = aroon_oscillator_config_map["market"].value
     base_asset, quote_asset = trading_pair.split("-")
-    return f"What is the amount of {base_asset} per order? >>> "
+    return "What is the order size as a percentage of total account balance? >>> "
 
 
 def validate_price_floor_ceiling(value: str) -> Optional[str]:
@@ -310,4 +310,19 @@ aroon_oscillator_config_map = {
                   required_if=lambda: False,
                   default=None,
                   type_str="json"),
+    "starting_volatility":
+        ConfigVar(key="starting_volatility",
+                  prompt="What is the default volatility for this trading pair? (Enter 1 for 1%) >>> ",
+                  type_str="decimal",
+                  required_if=lambda: False,
+                  validator=lambda v: validate_decimal(v, 0, 100, True),
+                  default=Decimal("1")),
+    "risk_factor":
+        ConfigVar(key="risk_factor",
+                  prompt="What is the risk factor? (0.5 = aggressive, 1 = moderate, 2 = conservative) >>> ",
+                  type_str="decimal",
+                  required_if=lambda: False,
+                  validator=lambda v: validate_decimal(v, 0.2, 3, True),
+                  prompt_on_new=True,
+                  default=Decimal("1")),
 }

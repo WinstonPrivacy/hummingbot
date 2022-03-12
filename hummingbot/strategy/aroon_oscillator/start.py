@@ -49,6 +49,16 @@ def start(self):
         order_override = c_map.get("order_override").value
         cancel_order_spread_threshold = c_map.get("cancel_order_spread_threshold").value / Decimal('100')
 
+        # sv = c_map.get("starting_volatility").value
+        # self.logger().info(f"cmap starting_volatility = {sv}")
+        starting_volatility = Decimal(".01") if c_map.get("starting_volatility").value is None else \
+            c_map.get("starting_volatility").value / Decimal('100')
+
+        risk_factor = Decimal("1") if c_map.get("risk_factor").value is None else \
+            c_map.get("risk_factor").value
+
+        # self.logger().info(f"parsed starting_volatility = {starting_volatility}")
+
         trading_pair: str = raw_trading_pair
         maker_assets: Tuple[str, str] = self._initialize_market_assets(exchange, [trading_pair])[0]
         market_names: List[Tuple[str, List[str]]] = [(exchange, [trading_pair])]
@@ -98,7 +108,9 @@ def start(self):
             hb_app_notification=True,
             order_override={} if order_override is None else order_override,
             debug_csv_path=debug_csv_path,
-            is_debug=True
+            is_debug=True,
+            starting_volatility=starting_volatility,
+            risk_factor=risk_factor,
         )
     except Exception as e:
         self._notify(str(e))

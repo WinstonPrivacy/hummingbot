@@ -52,7 +52,7 @@ max_order_age: null
 # (Enter 1 to indicate 1%), value below 0, e.g. -1, is to disable this feature - not recommended.
 order_refresh_tolerance_pct: null
 
-# Size of your bid and ask order.
+# Size of your bid and ask order as a percentage of the total available balance of both trading pairs.
 order_amount: null
 
 # Price band ceiling.
@@ -121,3 +121,8 @@ take_if_crossed: null
 # Please make sure there is a space between : and [
 order_override: null
 
+# Placeholder for volatility, used when starting the bot. Defaults to 1%.
+starting_volatility: null
+
+# risk factor - 2-3 is ideal for LUNA.
+risk_factor: null
