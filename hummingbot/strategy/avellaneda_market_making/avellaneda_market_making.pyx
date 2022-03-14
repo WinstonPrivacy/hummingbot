@@ -714,7 +714,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         # from the midprice, use the prior kappa price if a new estimte is not available.
         if self._kappa == 0:
             self._kappa = self._last_kappa
-            self.logger().info(f"warning: kappa not available. Using last value of {self._kappa:.f4}")
+            self.logger().info(f"warning: kappa not available. Using last value of {self._kappa:.4f}")
         else:
             self._last_kappa = 0.0
 
