@@ -614,6 +614,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
             self.c_collect_market_variables(timestamp)
             if self.c_is_algorithm_ready():
+                self.logger().info("tick (ready)")
                 if self._create_timestamp <= self._current_timestamp:
                     # Measure order book liquidity
                     self.c_measure_order_book_liquidity()
@@ -630,8 +631,8 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                 # Only if snapshots are different - for trading intensity - a market order happened
                 if self.c_is_algorithm_changed():
                     self._ticks_to_be_ready -= 1
-                    if self._ticks_to_be_ready % 5 == 0:
-                        self.logger().info(f"Calculating volatility, estimating order book liquidity ... {self._ticks_to_be_ready} ticks to fill buffers")
+                    # if self._ticks_to_be_ready % 5 == 0:
+                    self.logger().info(f"Calculating volatility, estimating order book liquidity ... {self._ticks_to_be_ready} ticks to fill buffers")
                 else:
                     self.logger().info(f"Calculating volatility, estimating order book liquidity ... no change tick")
         finally:
@@ -643,7 +644,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         if self._create_timestamp <= self._current_timestamp:
             # 1. Calculate reservation price and optimal spread from gamma, alpha, kappa and volatility
             self.c_calculate_reservation_price_and_optimal_spread()
-            # 2. Check if calcted prices make sense
+            # 2. Check if calculated prices make sense
             if self._optimal_bid > 0 and self._optimal_ask > 0:
                 # 3. Create base order proposals
                 proposal = self.c_create_base_proposal()
@@ -1100,7 +1101,6 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
             if len(proposal.buys) > 0:
                 if q > 0:
                     for i, proposed in enumerate(proposal.buys):
-
                         proposal.buys[i].size = market.c_quantize_order_amount(trading_pair, proposal.buys[i].size * Decimal.exp(-self._eta * q))
                     proposal.buys = [o for o in proposal.buys if o.size > 0]
 
