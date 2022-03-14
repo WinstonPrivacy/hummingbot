@@ -716,7 +716,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
             self._kappa = self._last_kappa
             self.logger().info(f"warning: kappa not available. Using last value of {self._kappa:.4f}")
         else:
-            self._last_kappa = 0.0
+            self._last_kappa = self._kappa
 
         if self._is_debug:
             self.logger().info(f"alpha={self._alpha:.4f} | "
