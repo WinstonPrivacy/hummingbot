@@ -739,6 +739,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
         # order book liquidity - kappa and alpha have to represent absolute values because the second member of the optimal spread equation has to be an absolute price
         # and from the reservation price calculation we know that gamma's unit is not absolute price
+        self.logger().info(f"gamma: {self._gamma}  kappa: {self._kappa}  alpha: {self._alpha}  vol: {vol}")
         if all((self._gamma, self._kappa)) and self._alpha != 0 and self._kappa > 0 and vol != 0:
             if self._execution_state.time_left is not None and self._execution_state.closing_time is not None:
                 # Avellaneda-Stoikov for a fixed timespan
