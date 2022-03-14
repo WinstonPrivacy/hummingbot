@@ -40,6 +40,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         int _ticks_to_be_ready
         object _alpha
         object _kappa
+        object _last_kappa
         object _gamma
         object _eta
         str _execution_timeframe

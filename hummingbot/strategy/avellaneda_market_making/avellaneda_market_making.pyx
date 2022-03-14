@@ -130,6 +130,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         self._last_sampling_timestamp = 0
         self._alpha = None
         self._kappa = None
+        self._last_kappa = None
         self._gamma = risk_factor
         self._eta = order_amount_shape_factor
         self._execution_timeframe = execution_timeframe
@@ -644,7 +645,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
             # 1. Calculate reservation price and optimal spread from gamma, alpha, kappa and volatility
             self.c_calculate_reservation_price_and_optimal_spread()
 
-            self.logger().info(f"process_tick - optimal bid: {self._optimal_bid:.4f}  optimal ask: {self._optimal_ask:.4f}")
+            # self.logger().info(f"process_tick - optimal bid: {self._optimal_bid:.4f}  optimal ask: {self._optimal_ask:.4f}")
             # 2. Check if calculated prices make sense
             if self._optimal_bid > 0 and self._optimal_ask > 0:
                 # 3. Create base order proposals
@@ -657,8 +658,8 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                 self.c_apply_budget_constraint(proposal)
 
                 self.c_cancel_active_orders(proposal)
-        else:
-            self.logger().info("process_tick - create timestamp is in the future")
+        # else:
+        #     self.logger().info("process_tick - create timestamp is in the future")
 
         if self.c_to_create_orders(proposal):
             self.c_execute_orders_proposal(proposal)
@@ -708,6 +709,14 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
         self._alpha = Decimal(self._alpha)
         self._kappa = Decimal(self._kappa)
+
+        # FIX: Kappa will frequently revert back to 0. To avoid having the reservation price drift away
+        # from the midprice, use the prior kappa price if a new estimte is not available.
+        if self._kappa == 0:
+            self._kappa = self._last_kappa
+            self.logger().info(f"warning: kappa not available. Using last value of {self._kappa:f4}")
+        else:
+            self._last_kappa = 0.0
 
         if self._is_debug:
             self.logger().info(f"alpha={self._alpha:.4f} | "
