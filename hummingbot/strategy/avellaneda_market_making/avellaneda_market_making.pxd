@@ -49,6 +49,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         double _min_spread
         object _q_adjustment_factor
         object _reservation_price
+        object _reservation_price_delta
         object _optimal_spread
         object _optimal_bid
         object _optimal_ask

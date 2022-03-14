@@ -139,6 +139,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         self._min_spread = min_spread
         self._latest_parameter_calculation_vol = s_decimal_zero
         self._reservation_price = s_decimal_zero
+        self._reservation_price_delta = s_decimal_zero
         self._optimal_spread = s_decimal_zero
         self._optimal_ask = s_decimal_zero
         self._optimal_bid = s_decimal_zero
@@ -495,6 +496,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         markets_data = []
         markets_columns = ["Exchange", "Market", "Best Bid", "Best Ask", f"MidPrice"]
         markets_columns.append('Reservation Price')
+        markets_columns.append('Delta')
         markets_columns.append('Optimal Spread')
         market_books = [(self._market_info.market, self._market_info.trading_pair)]
         for market, trading_pair in market_books:
@@ -508,6 +510,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                 float(ask_price),
                 float(ref_price),
                 round(self._reservation_price, 5),
+                round(self._reservation_price_delta, 4),
                 round(self._optimal_spread, 5),
             ])
         return pd.DataFrame(data=markets_data, columns=markets_columns).replace(np.nan, '', regex=True)
@@ -638,7 +641,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         if self._create_timestamp <= self._current_timestamp:
             # 1. Calculate reservation price and optimal spread from gamma, alpha, kappa and volatility
             self.c_calculate_reservation_price_and_optimal_spread()
-            # 2. Check if calculated prices make sense
+            # 2. Check if calcted prices make sense
             if self._optimal_bid > 0 and self._optimal_ask > 0:
                 # 3. Create base order proposals
                 proposal = self.c_create_base_proposal()
@@ -744,7 +747,8 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                 # a fixed time left
                 time_left_fraction = 1
 
-            self._reservation_price = price - (q * self._gamma * mid_price_variance * time_left_fraction)
+            self._reservation_price_delta = - (q * self._gamma * mid_price_variance * time_left_fraction)
+            self._reservation_price = price + self._reservation_price_delta
 
             self._optimal_spread = self._gamma * mid_price_variance * time_left_fraction
             self._optimal_spread += 2 * Decimal(1 + self._gamma / self._kappa).ln() / self._gamma
@@ -1395,3 +1399,4 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                             mid_price_variance,
                             self.inventory_target_base_pct)])
         df.to_csv(self._debug_csv_path, mode='a', header=False, index=False)
+
