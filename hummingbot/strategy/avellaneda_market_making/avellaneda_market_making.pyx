@@ -614,11 +614,9 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
             self.c_collect_market_variables(timestamp)
             if self.c_is_algorithm_ready():
-                self.logger().info("tick (ready)")
                 if self._create_timestamp <= self._current_timestamp:
                     # Measure order book liquidity
                     self.c_measure_order_book_liquidity()
-                    self.logger().info("c_measure_order_book_liquidity")
 
                 self._hanging_orders_tracker.process_tick()
 
@@ -643,9 +641,10 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         proposal = None
         # Trading is allowed
         if self._create_timestamp <= self._current_timestamp:
-            self.logger().info("process_tick - trading is allowed")
             # 1. Calculate reservation price and optimal spread from gamma, alpha, kappa and volatility
             self.c_calculate_reservation_price_and_optimal_spread()
+
+            self.logger().info(f"process_tick - optimal bid: {self._optimal_bid:.4f}  optimal ask: {self._optimal_ask:.4f}")
             # 2. Check if calculated prices make sense
             if self._optimal_bid > 0 and self._optimal_ask > 0:
                 # 3. Create base order proposals
