@@ -71,7 +71,7 @@ order_override: null
 
 
 
-# Avellaneda - Stoikov algorithm parameters
+# Avellaneda - Stoikov algorithm parameters.
 risk_factor: 1
 order_amount_shape_factor: 0
 min_spread: 0
