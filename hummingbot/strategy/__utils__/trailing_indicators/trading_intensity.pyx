@@ -120,6 +120,7 @@ cdef class TradingIntensityIndicator():
 
         # Fit the probability density function; reuse previously calculated parameters as initial values
         try:
+
             params = curve_fit(lambda t, a, b: a*np.exp(-b*t),
                                price_levels,
                                lambdas_adj,
@@ -129,6 +130,8 @@ cdef class TradingIntensityIndicator():
 
             self._kappa = Decimal(str(params[0][1]))
             self._alpha = Decimal(str(params[0][0]))
+
+            self.logger().info(f"c_estimate_intensity - kappa:{self._kappa}  alpha:{self._alpha}")
         except (RuntimeError, ValueError) as e:
             pass
 
@@ -148,10 +151,12 @@ cdef class TradingIntensityIndicator():
 
         if self._bids_df is not None and self._asks_df is not None:
             # Retrieve previous order book, evaluate execution
+            self.logger().info("trading intensity indicator: simulating execution")
             self.c_simulate_execution(bids_df, asks_df)
 
             if self.is_sampling_buffer_full:
                 # Estimate alpha and kappa
+                self.logger().info("trading intensity indicator: buffer full - estimating intensity")
                 self.c_estimate_intensity()
 
         # Store the orderbook
