@@ -749,6 +749,8 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
             self._optimal_spread = self._gamma * mid_price_variance * time_left_fraction
             self._optimal_spread += 2 * Decimal(1 + self._gamma / self._kappa).ln() / self._gamma
 
+	    self.logger().info(f"q-target: {q_target  q:  {q:.2f}  inventory adj: {-(q * self._gamma * mid_price_variance * time_left_fraction):.2f}  order book adj: {2 * Decimal(1 + self._gamma / self._kappa).ln() / self._gamma:.2f}")
+
             min_spread = price / 100 * Decimal(str(self._min_spread))
 
             max_limit_bid = price - min_spread / 2
