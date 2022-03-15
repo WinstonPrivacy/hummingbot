@@ -56,6 +56,9 @@ def start(self):
         start_time = c_map.get("start_time").value
         end_time = c_map.get("end_time").value
 
+        starting_volatility = Decimal(".01") if c_map.get("starting_volatility").value is None else \
+            c_map.get("starting_volatility").value / Decimal('100')
+
         if execution_timeframe == "from_date_to_date":
             start_time = datetime.datetime.fromisoformat(start_time)
             end_time = datetime.datetime.fromisoformat(end_time)
@@ -104,7 +107,8 @@ def start(self):
             volatility_buffer_size=volatility_buffer_size,
             trading_intensity_buffer_size=trading_intensity_buffer_size,
             should_wait_order_cancel_confirmation=should_wait_order_cancel_confirmation,
-            is_debug=False
+            is_debug=False,
+            starting_volatility=starting_volatility
         )
     except Exception as e:
         self._notify(str(e))

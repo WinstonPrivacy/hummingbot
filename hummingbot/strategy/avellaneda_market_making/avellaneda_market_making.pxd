@@ -60,6 +60,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         object _avg_vol
         object _trading_intensity
         bint _should_wait_order_cancel_confirmation
+        object _starting_volatility
 
     cdef object c_get_mid_price(self)
     cdef object c_get_order_book_snapshot(self)

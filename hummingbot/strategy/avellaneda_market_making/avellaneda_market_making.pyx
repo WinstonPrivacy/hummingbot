@@ -93,6 +93,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                     trading_intensity_price_levels: Tuple[float] = tuple(np.geomspace(1, 2, 10) - 1),
                     should_wait_order_cancel_confirmation = True,
                     is_debug: bool = False,
+                    starting_volatility: Decimal = Decimal("0.01"),
                     ):
         self._sb_order_tracker = OrderTracker()
         self._market_info = market_info
@@ -147,6 +148,9 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         self._should_wait_order_cancel_confirmation = should_wait_order_cancel_confirmation
         self._debug_csv_path = debug_csv_path
         self._is_debug = is_debug
+
+        self._starting_volatility = starting_volatility
+
         try:
             if self._is_debug:
                 os.unlink(self._debug_csv_path)
@@ -421,6 +425,14 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
     def logging_options(self) -> int:
         return self._logging_options
 
+    @property
+    def starting_volatility(self) -> Decimal:
+        return self._starting_volatility
+
+    @starting_volatility.setter
+    def starting_volatility(self, value: Decimal):
+        self._starting_volatility = value
+
     @logging_options.setter
     def logging_options(self, int64_t logging_options):
         self._logging_options = logging_options
@@ -582,6 +594,22 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                     self._hanging_orders_tracker.add_as_hanging_order(order)
 
         self._execution_state.time_left = self._execution_state.closing_time
+
+        # Backfill the volatility buffer with the starting volatility parameter, if present.
+        # This will enable trading to begin faster.
+        # TODO: Repeat with order book intensity
+        if self._starting_volatility is not None and self._starting_volatility != 0:
+            self.logger().info(f"Backfilling volatility with {self._starting_volatility / Decimal(100):.2%}")
+            price = self.get_price()
+            self.logger().info(f"starting price: {price:.4f}")
+            vol_factor = Decimal(1.0) + self._starting_volatility / Decimal(100)
+            ticks = int(self._ticks_to_be_ready / 2)
+            self.logger().info(f"# ticks: {ticks}  vol_factor: {vol_factor:.4f}")
+            for x in range():
+                self._avg_vol.add_sample(price * vol_factor)
+                self._avg_vol.add_sample(price / vol_factor)
+
+
 
     def start(self, clock: Clock, timestamp: float):
         self.c_start(clock, timestamp)

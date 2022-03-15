@@ -84,3 +84,6 @@ trading_intensity_buffer_size: 200
 
 # If the strategy should wait to receive cancellations confirmation before creating new orders during refresh time
 should_wait_order_cancel_confirmation: True
+
+# Placeholder for volatility, used when starting the bot. Defaults to 1%.
+starting_volatility: null
