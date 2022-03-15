@@ -51,13 +51,12 @@ def start(self):
 
         # sv = c_map.get("starting_volatility").value
         # self.logger().info(f"cmap starting_volatility = {sv}")
-        starting_volatility = Decimal(".01") if c_map.get("starting_volatility").value is None else \
-            c_map.get("starting_volatility").value / Decimal('100')
 
         risk_factor = Decimal("1") if c_map.get("risk_factor").value is None else \
             c_map.get("risk_factor").value
 
-        # self.logger().info(f"parsed starting_volatility = {starting_volatility}")
+        starting_volatility = Decimal("1") if c_map.get("starting_volatility").value is None else \
+            c_map.get("starting_volatility").value / Decimal('100')
 
         trading_pair: str = raw_trading_pair
         maker_assets: Tuple[str, str] = self._initialize_market_assets(exchange, [trading_pair])[0]

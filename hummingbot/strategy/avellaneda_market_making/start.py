@@ -51,13 +51,15 @@ def start(self):
         risk_factor = c_map.get("risk_factor").value
         order_amount_shape_factor = c_map.get("order_amount_shape_factor").value
 
+        starting_volatility = Decimal("1") if c_map.get("starting_volatility").value is None else \
+            c_map.get("starting_volatility").value
+
+        self.logger().info(f"parsed starting_volatility = {starting_volatility}")
+
         execution_timeframe = c_map.get("execution_timeframe").value
 
         start_time = c_map.get("start_time").value
         end_time = c_map.get("end_time").value
-
-        starting_volatility = Decimal(".01") if c_map.get("starting_volatility").value is None else \
-            c_map.get("starting_volatility").value / Decimal('100')
 
         if execution_timeframe == "from_date_to_date":
             start_time = datetime.datetime.fromisoformat(start_time)

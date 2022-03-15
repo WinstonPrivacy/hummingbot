@@ -93,7 +93,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                     trading_intensity_price_levels: Tuple[float] = tuple(np.geomspace(1, 2, 10) - 1),
                     should_wait_order_cancel_confirmation = True,
                     is_debug: bool = False,
-                    starting_volatility: Decimal = Decimal("0.01"),
+                    starting_volatility: Decimal = Decimal("1.0"),
                     ):
         self._sb_order_tracker = OrderTracker()
         self._market_info = market_info
@@ -126,12 +126,12 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
         self.c_add_markets([market_info.market])
         self._ticks_to_be_ready = max(volatility_buffer_size, trading_intensity_buffer_size)
-        self._avg_vol = InstantVolatilityIndicator(sampling_length=volatility_buffer_size)
+        self._avg_vol = InstantVolatilityIndicator(sampling_length=volatility_buffer_size, processing_length=volatility_buffer_size)
         self._trading_intensity = TradingIntensityIndicator(trading_intensity_buffer_size)
         self._last_sampling_timestamp = 0
         self._alpha = None
         self._kappa = None
-        self._last_kappa = None
+        self._last_kappa = 0.0
         self._gamma = risk_factor
         self._eta = order_amount_shape_factor
         self._execution_timeframe = execution_timeframe
@@ -595,19 +595,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
         self._execution_state.time_left = self._execution_state.closing_time
 
-        # Backfill the volatility buffer with the starting volatility parameter, if present.
-        # This will enable trading to begin faster.
-        # TODO: Repeat with order book intensity
-        if self._starting_volatility is not None and self._starting_volatility != 0:
-            self.logger().info(f"Backfilling volatility with {self._starting_volatility / Decimal(100):.2%}")
-            price = self.get_price()
-            self.logger().info(f"starting price: {price:.4f}")
-            vol_factor = Decimal(1.0) + self._starting_volatility / Decimal(100)
-            ticks = int(self._ticks_to_be_ready / 2)
-            self.logger().info(f"# ticks: {ticks}  vol_factor: {vol_factor:.4f}")
-            for x in range():
-                self._avg_vol.add_sample(price * vol_factor)
-                self._avg_vol.add_sample(price / vol_factor)
+
 
 
 
@@ -642,6 +630,22 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
                                           f"making may be dangerous when markets or networks are unstable.")
 
             self.c_collect_market_variables(timestamp)
+
+            # Backfill the volatility buffer with the starting volatility parameter, if present.
+            # This will enable trading to begin faster.
+            # TODO: Repeat with order book intensity
+            if not self._avg_vol.is_sampling_buffer_full and self._starting_volatility != 0:
+                # self.logger().info(f"Backfilling volatility with {self._starting_volatility / Decimal(100):.2%}")
+                price = self.get_price()
+                # self.logger().info(f"starting price: {price:.4f}")
+                vol_factor = Decimal(1.0) + (self._starting_volatility / Decimal(2.0))  / Decimal(100)
+                ticks = int(self._ticks_to_be_ready / 2)
+                # self.logger().info(f"# ticks: {ticks}  vol_factor: {vol_factor:.4f}")
+                for x in range(ticks):
+                    self._avg_vol.add_sample(price * vol_factor)
+                    self._avg_vol.add_sample(price / vol_factor)
+
+
             if self.c_is_algorithm_ready():
                 if self._create_timestamp <= self._current_timestamp:
                     # Measure order book liquidity
@@ -657,6 +661,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
             else:
                 # Only if snapshots are different - for trading intensity - a market order happened
+                # self.logger().info(f"vol buffer full: {self._avg_vol.is_sampling_buffer_full}  trading_intensity buffer full: {self._trading_intensity.is_sampling_buffer_full}")
                 if self.c_is_algorithm_changed():
                     self._ticks_to_be_ready -= 1
                     if self._ticks_to_be_ready % 5 == 0:
@@ -740,7 +745,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
 
         # FIX: Kappa will frequently revert back to 0. To avoid having the reservation price drift away
         # from the midprice, use the prior kappa price if a new estimte is not available.
-        if self._kappa == 0:
+        if self._kappa == 0 and self._last_kappa > 0:
             self._kappa = self._last_kappa
             self.logger().info(f"warning: kappa not available. Using last value of {self._kappa:.4f}")
         else:
@@ -772,11 +777,14 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         # Volatility has to be in absolute values (prices) because in calculation of reservation price it's not multiplied by the current price, therefore
         # it can't be a percentage. The result of the multiplication has to be an absolute price value because it's being subtracted from the current price
         vol = self.get_volatility()
+
+        # vol represents the 1 tick volatility. This must be adjusted for longer time periods.
+        # vol = vol_short * Decimal(self._order_refresh_time) ** Decimal(.5)
         mid_price_variance = vol ** 2
 
         # order book liquidity - kappa and alpha have to represent absolute values because the second member of the optimal spread equation has to be an absolute price
         # and from the reservation price calculation we know that gamma's unit is not absolute price
-        self.logger().info(f"gamma: {self._gamma}  kappa: {self._kappa}  alpha: {self._alpha}  vol: {vol}")
+        # self.logger().info(f"vol: {vol_short}  vol_long: {vol}")
         if all((self._gamma, self._kappa)) and self._alpha != 0 and self._kappa > 0 and vol != 0:
             if self._execution_state.time_left is not None and self._execution_state.closing_time is not None:
                 # Avellaneda-Stoikov for a fixed timespan
@@ -797,7 +805,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
             self._optimal_spread = self._gamma * mid_price_variance * time_left_fraction
             self._optimal_spread += 2 * Decimal(1 + self._gamma / self._kappa).ln() / self._gamma
 
-            self.logger().info(f"q-target: {q_target:.2f}   q: {q:.2f}  gamma:{self._gamma:.2f}  time_left_fraction:{time_left_fraction:.2f} variance:{mid_price_variance:.4f}  inventory adj: {-(q * self._gamma * mid_price_variance * time_left_fraction):.4f}  order book adj: {2 * Decimal(1 + self._gamma / self._kappa).ln() / self._gamma:.2f}")
+            # self.logger().info(f"q-target: {q_target:.2f}   q: {q:.2f}  gamma:{self._gamma:.2f}  time_left_fraction:{time_left_fraction:.2f} variance:{mid_price_variance:.4f}  inventory adj: {-(q * self._gamma * mid_price_variance * time_left_fraction):.4f}  order book adj: {2 * Decimal(1 + self._gamma / self._kappa).ln() / self._gamma:.2f}")
 
             min_spread = price / 100 * Decimal(str(self._min_spread))
 

@@ -76,14 +76,17 @@ risk_factor: 1
 order_amount_shape_factor: 0
 min_spread: 0
 
+# Placeholder for volatility, used when starting the bot. Defaults to 1%.
+starting_volatility: 1.0
+
 # Buffer size used to store historic samples and calculate volatility
 volatility_buffer_size: 60
 
 # Buffer size used to store historic trades and calculate order book liquidity
 trading_intensity_buffer_size: 200
 
+
 # If the strategy should wait to receive cancellations confirmation before creating new orders during refresh time
 should_wait_order_cancel_confirmation: True
 
-# Placeholder for volatility, used when starting the bot. Defaults to 1%.
-starting_volatility: null
+

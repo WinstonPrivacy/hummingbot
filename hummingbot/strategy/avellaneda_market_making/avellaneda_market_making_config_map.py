@@ -233,6 +233,13 @@ avellaneda_market_making_config_map = {
                   type_str="decimal",
                   default=Decimal("10"),
                   validator=lambda v: validate_decimal(v, 0, 100, inclusive=False)),
+    "starting_volatility":
+        ConfigVar(key="starting_volatility",
+                  prompt="What is the default volatility for this trading pair? (Enter 1 for 1%) >>> ",
+                  type_str="decimal",
+                  required_if=lambda: False,
+                  validator=lambda v: validate_decimal(v, 0, 100, True),
+                  default=Decimal("1")),
     "should_wait_order_cancel_confirmation":
         ConfigVar(key="should_wait_order_cancel_confirmation",
                   prompt="Should the strategy wait to receive a confirmation for orders cancellation "

@@ -23,6 +23,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         bint _add_transaction_costs_to_orders
         bint _hb_app_notification
         bint _is_debug
+        object _starting_volatility
 
         double _cancel_timestamp
         double _create_timestamp
@@ -60,7 +61,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         object _avg_vol
         object _trading_intensity
         bint _should_wait_order_cancel_confirmation
-        object _starting_volatility
+
 
     cdef object c_get_mid_price(self)
     cdef object c_get_order_book_snapshot(self)
