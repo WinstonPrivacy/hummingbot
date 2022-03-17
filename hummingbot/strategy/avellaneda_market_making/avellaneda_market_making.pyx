@@ -28,6 +28,7 @@ from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils import map_df_to_str
 from hummingbot.strategy.__utils__.trailing_indicators.instant_volatility import InstantVolatilityIndicator
 from hummingbot.strategy.__utils__.trailing_indicators.trading_intensity import TradingIntensityIndicator
+from .volatility_indicator import RollingVolatilityIndicator
 from hummingbot.strategy.conditional_execution_state import RunAlwaysExecutionState
 from hummingbot.strategy.data_types import (
     PriceSize,
@@ -127,6 +128,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         self.c_add_markets([market_info.market])
         self._ticks_to_be_ready = max(volatility_buffer_size, trading_intensity_buffer_size)
         self._avg_vol = InstantVolatilityIndicator(sampling_length=volatility_buffer_size, processing_length=volatility_buffer_size)
+        self._rolling_vol = RollingVolatilityIndicator(sampling_length=volatility_buffer_size)
         self._trading_intensity = TradingIntensityIndicator(trading_intensity_buffer_size)
         self._last_sampling_timestamp = 0
         self._alpha = None
@@ -183,6 +185,14 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
     @avg_vol.setter
     def avg_vol(self, indicator: InstantVolatilityIndicator):
         self._avg_vol = indicator
+
+    @property
+    def rolling_vol(self):
+        return self._rolling_vol
+
+    @rolling_vol.setter
+    def rolling_vol(self, indicator: RollingVolatilityIndicator):
+        self._rolling_vol = indicator
 
     @property
     def trading_intensity(self):
@@ -556,10 +566,19 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         if isnan(volatility_pct):
             volatility_pct = 0.0
         if all((self._gamma, self._alpha, self._kappa, not isnan(volatility_pct))):
+            # self.logger().info(f"volatility-1={self._rolling_vol.array(1)}")
             lines.extend(["", f"  Strategy parameters:",
                           f"    risk_factor(\u03B3)= {self._gamma:.5E}",
                           f"    order_book_intensity_factor(\u0391)= {self._alpha:.5E}",
                           f"    order_book_depth_factor(\u03BA)= {self._kappa:.5E}",
+                          f"    volatility-1= {self._rolling_vol.value(1):.4%}",
+                          f"    volatility-5= {self._rolling_vol.value(5):.4%}",
+                          f"    volatility-10= {self._rolling_vol.value(10):.4%}",
+                          f"    volatility-30= {self._rolling_vol.value(30):.4%}",
+                          f"    volatility-60= {self._rolling_vol.value(60):.4%}",
+                          f"    volatility-120= {self._rolling_vol.value(120):.4%}",
+                          f"    volatility-180= {self._rolling_vol.value(180):.4%}",
+                          f"    volatility-600= {self._rolling_vol.value(600):.4%}",
                           f"    volatility= {volatility_pct:.3f}%"])
             if self._execution_state.time_left is not None:
                 lines.extend([f"    time until end of trading cycle = {str(datetime.timedelta(seconds=float(self._execution_state.time_left)//1e3))}"])
@@ -634,6 +653,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
             # Backfill the volatility buffer with the starting volatility parameter, if present.
             # This will enable trading to begin faster.
             # TODO: Repeat with order book intensity
+            # TODO: Repeat with rolling volatility
             if not self._avg_vol.is_sampling_buffer_full and self._starting_volatility != 0:
                 # self.logger().info(f"Backfilling volatility with {self._starting_volatility / Decimal(100):.2%}")
                 price = self.get_price()
@@ -707,6 +727,7 @@ cdef class AvellanedaMarketMakingStrategy(StrategyBase):
         price = self.get_price()
         snapshot = self.get_order_book_snapshot()
         self._avg_vol.add_sample(price)
+        self._rolling_vol.add_sample(price)
         self._trading_intensity.add_sample(snapshot)
         # Calculate adjustment factor to have 0.01% of inventory resolution
         base_balance = market.get_balance(base_asset)

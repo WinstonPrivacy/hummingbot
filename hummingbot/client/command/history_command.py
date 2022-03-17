@@ -238,6 +238,55 @@ class HistoryCommand:
             df: pd.DataFrame = TradeFill.to_pandas(queried_trades)
 
         if len(df) > 0:
+            # Calculate closed P/L for all matching trades
+            buy_df = df[df['Side'] == 'buy']
+            sell_df = df[df['Side'] == 'sell']
+            # maxrows = min(len(buy_df), len(sell_df))
+            # self.logger().info(f"maxrows: {maxrows}")
+            buy_qty = float((buy_df['Amount']).sum())
+            sell_qty = float((sell_df['Amount']).sum())
+            buy_pl = float((buy_df['Price'] * buy_df['Amount']).sum())
+            sell_pl = float((sell_df['Price'] * sell_df['Amount']).sum())
+
+            # This is the PL of all open trades.
+            closed_pl = sell_pl - buy_pl
+            # self.logger().info(f"Open PL: {open_pl}  buy_qty:{buy_qty}  sell_qty:{sell_qty}")
+
+            # Determine the closed P&L by offsetting any open trades
+            if buy_qty > sell_qty:
+                # self.logger().info("BUY > SELL")
+                qty_remaining = buy_qty - sell_qty
+                for ind in range(len(buy_df.index) - 1, -1, -1):
+                    # for row in buy_df[::-1].iterrows():
+                    row = buy_df.iloc[[ind]]
+                    # self.logger().info(f"row: {row}")
+                    amount = float(row['Amount'].sum())
+                    if amount >= qty_remaining:
+                        closed_pl += qty_remaining * float(row['Price'].sum())
+                        # self.logger().info(f"Adding {qty_remaining * float(row['Price'].sum())} back to closed P/L. qty: { qty_remaining} * price: {float(row['Price'].sum())}")
+                        break
+                    else:
+                        qty_remaining -= float(row['Amount'].sum())
+                        closed_pl += float(row['Amount'].sum()) * float(row['Price'].sum())
+                        # self.logger().info(f"Adding {float(row['Amount'].sum()) * float(row['Price'].sum())} back to closed P/L. qty: {float(row['Amount'].sum())} * price: {float(row['Price'].sum())}")
+            else:
+                # self.logger().info("SELL > BUY")
+                qty_remaining = sell_qty - buy_qty
+                for ind in range(len(sell_df.index) - 1, -1, -1):
+                    row = sell_df.iloc[[ind]]
+                    # self.logger().info(f"row: {row}")
+                    amount = float(row['Amount'].sum())
+                    if amount >= qty_remaining:
+                        closed_pl -= qty_remaining * float(row['Price'].sum())
+                        # self.logger().info(f"Subtracting {qty_remaining * float(row['Price'].sum())} from closed P/L. qty: {qty_remaining} * price: {float(row['Price'].sum())}")
+                        break
+                    else:
+                        qty_remaining -= float(row['Amount'].sum())
+                        closed_pl -= float(row['Amount'].sum()) * float(row['Price'].sum())
+                        self.logger().info(f"Subtracting {float(row['Amount'].sum()) * float(row['Price'].sum())} from closed P/L. qty: {float(row['Amount'].sum())} * price: {float(row['Price'].sum())}")
+
+            # self.logger().info(f"buy_pl: {buy_pl}  sell_pl: {sell_pl}")
+
             # Check if number of trades exceed maximum number of trades to display
             if len(df) > MAXIMUM_TRADE_FILLS_DISPLAY_OUTPUT:
                 df_lines = str(df[:MAXIMUM_TRADE_FILLS_DISPLAY_OUTPUT]).split("\n")
@@ -247,6 +296,8 @@ class HistoryCommand:
                 df_lines = str(df).split("\n")
             lines.extend(["", "  Recent trades:"] +
                          ["    " + line for line in df_lines])
+
+            lines.extend([f"\nClosed trade P&L: {(closed_pl):.4f}"])
         else:
             lines.extend(["\n  No past trades in this session."])
         self._notify("\n".join(lines))
